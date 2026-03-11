@@ -23,7 +23,7 @@ use revm::{
 };
 use revm_context::{
     BlockEnv, CfgEnv, TxEnv,
-    result::{EVMError, ExecutionResult},
+    result::{EVMError, ExecutionResult, ResultAndState},
 };
 use revm_inspector::NoOpInspector;
 use revm_primitives::Address;
@@ -600,8 +600,12 @@ where
                 let tx_env = self.txs[txid].clone();
                 let result_and_state =
                     evm.transact_raw(tx_env).map_err(|e| GrevmError { txid, error: e.clone() })?;
-                evm.db_mut().commit(result_and_state.state);
-                sequential_results.push(result_and_state.result);
+                let ResultAndState { result, state, lazy_reward } = result_and_state;
+                evm.db_mut().commit(state);
+                evm.db_mut()
+                    .increment_balances(vec![(self.env.beneficiary, lazy_reward)])
+                    .map_err(|e| GrevmError { txid, error: EVMError::Database(e) })?;
+                sequential_results.push(result);
                 self.metrics.execution_cnt.fetch_add(1, Ordering::Relaxed);
             }
         }
